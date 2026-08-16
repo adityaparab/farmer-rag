@@ -188,21 +188,21 @@ eval/golden.example.yaml   # golden-question template for retrieval eval
 ## 5. Step-by-step implementation plan
 
 - [x] **Phase 0 — Research & plan**: verify ecosystem state, choose architecture, write this doc.
-- [ ] **Phase 1 — Scaffold & config**: uv deps; pyright + ruff config in `pyproject.toml`
+- [x] **Phase 1 — Scaffold & config**: uv deps; pyright + ruff config in `pyproject.toml`
       (root as import path); `Settings` with provider validation; `.env.example`; logging.
-- [ ] **Phase 2 — Storage layer**: SQLite docstore (parents/children), index manifest with
+- [x] **Phase 2 — Storage layer**: SQLite docstore (parents/children), index manifest with
       compatibility checks.
-- [ ] **Phase 3 — Ingestion pipeline**: parser → chunker → (optional contextualizer) → indexer;
+- [x] **Phase 3 — Ingestion pipeline**: parser → chunker → (optional contextualizer) → indexer;
       `farmer-rag ingest <pdf>` with `--force`; idempotency via pdf hash.
-- [ ] **Phase 4 — Retrieval pipeline**: BM25 + dense retrievers, RRF fusion, reranker,
+- [x] **Phase 4 — Retrieval pipeline**: BM25 + dense retrievers, RRF fusion, reranker,
       parent mapping; `farmer-rag status` shows index/config state.
-- [ ] **Phase 5 — Generation**: prompts, LangGraph corrective flow, citation verification,
+- [x] **Phase 5 — Generation**: prompts, LangGraph corrective flow, citation verification,
       streaming; `farmer-rag ask` / `farmer-rag chat`.
-- [ ] **Phase 6 — Web UI**: Streamlit chat with streaming, sources panel, abstention display;
+- [x] **Phase 6 — Web UI**: Streamlit chat with streaming, sources panel, abstention display;
       no ingestion affordances (read-only index status only).
-- [ ] **Phase 7 — Quality gates**: unit tests; pyright clean; ruff clean; retrieval eval
+- [x] **Phase 7 — Quality gates**: unit tests; pyright clean; ruff clean; retrieval eval
       harness (`farmer-rag eval` vs golden YAML); end-to-end smoke test with a sample PDF.
-- [ ] **Phase 8 — Docs & delivery**: README (setup, Ollama models, usage), commit history in
+- [x] **Phase 8 — Docs & delivery**: README (setup, Ollama models, usage), commit history in
       logical units, push.
 
 ## 6. Definition of done
