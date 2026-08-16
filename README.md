@@ -10,18 +10,25 @@ See [PROJECT.md](PROJECT.md) for the architecture rationale and implementation p
 ## Requirements
 
 - Python ≥ 3.12, [uv](https://docs.astral.sh/uv/)
-- For local development: an OpenAI-compatible model server, e.g. [Ollama](https://ollama.com):
+- For local development: [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server`
+  (OpenAI-compatible), one instance per role with your chosen GGUF models:
 
 ```bash
-ollama pull qwen3:8b
+llama-server -m qwen3-8b-instruct.gguf --port 8080
 ```
 
 ```bash
-ollama pull qwen3-embedding:0.6b
+llama-server -m qwen3-embedding-0.6b.gguf --embeddings --port 8081
 ```
 
-The reranker (`BAAI/bge-reranker-v2-m3`) is downloaded from Hugging Face on first use and
-runs in-process (MPS/CUDA/CPU) — no server needed.
+```bash
+llama-server -m bge-reranker-v2-m3.gguf --rerank --port 8082
+```
+
+The chat and embedding servers speak the OpenAI `/v1` API; the reranker uses llama.cpp's
+Jina-style `/v1/rerank` endpoint. Any other OpenAI-compatible stack (vLLM, LM Studio) works
+for chat/embeddings by pointing the base URLs at it; reranking needs a `/v1/rerank`-speaking
+server (or set `RERANKER_ENABLED=false`).
 
 ## Setup
 
@@ -33,7 +40,8 @@ uv sync
 cp .env.example .env
 ```
 
-The defaults in `.env.example` target local Ollama. To use a cloud provider, set
+The defaults in `.env.example` target the three local llama.cpp servers above. To use a
+cloud provider, set
 `LLM_PROVIDER=groq` (or `openai`) plus `LLM_MODEL` and `LLM_API_KEY` — no code changes.
 Embeddings support `local` and `openai` only (Groq has no embeddings API). **Changing the
 embedding model requires re-ingestion.**

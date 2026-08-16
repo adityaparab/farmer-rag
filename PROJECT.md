@@ -18,7 +18,7 @@ evaluations (arXiv 2504.19754).
 | Technique | Why |
 |---|---|
 | **Hybrid retrieval** (dense + BM25, RRF fusion) | Consensus production default. BM25 is critical here: remedy names (*Silicea*, *Arnica*), Latin plant/pest names, and potencies (6CH, 30CH, 200C) are exact-match tokens that dense embeddings handle poorly; dense catches paraphrased symptom descriptions. |
-| **Cross-encoder reranking** (local, in-process) | Single highest-ROI post-retrieval step. Anthropic's measurements: hybrid + rerank cuts top-20 retrieval failure from 5.7% → 1.9%. Runs in-process via `sentence-transformers` (`BAAI/bge-reranker-v2-m3`, MPS/CPU) because Ollama has no rerank API (ollama#16076). |
+| **Cross-encoder reranking** (local, via llama.cpp) | Single highest-ROI post-retrieval step. Anthropic's measurements: hybrid + rerank cuts top-20 retrieval failure from 5.7% → 1.9%. Served by a llama.cpp `llama-server --rerank` instance over its Jina-style `/v1/rerank` HTTP endpoint (`bge-reranker-v2-m3` GGUF) — the app itself carries no torch/model weights. |
 | **Parent/child (small-to-big) chunking** | Children (~250 tokens, heading-path prefixed) are embedded for precise matching; the *parent section* (~1000 tokens) is what the LLM sees. Farmer questions ("what do I spray for aphids?") need the full remedy section — dosage, preparation, cautions — not one sentence. Near-zero cost, 15–30% reported gains. |
 | **Query understanding step** (1 cheap LLM call) | The dominant expected failure mode is vocabulary mismatch: farmers ask "white powder on tomato leaves", the book says "powdery mildew … Silicea". One call normalizes phrasing into book vocabulary, emits 2–3 retrieval variants, and condenses chat history into a standalone question. Variants are unioned pre-rerank. |
 | **Corrective loop (CRAG-lite) in LangGraph** | The useful fragment of Agentic RAG for a closed corpus: grade reranked context → if weak, rewrite the query and retry once → if still weak, **abstain** (never fall back to model knowledge). Bounded retries; deterministic graph, not free agent tool-calling — more reliable with small local models. |
@@ -74,6 +74,7 @@ question + chat history
   └─► understand   : condense history → standalone question; emit ≤3 book-vocabulary variants
   └─► retrieve     : per variant → dense top-k (Chroma) + BM25 top-k (docstore)
                      → RRF fusion (k=60) → union → cross-encoder rerank
+                       (llama.cpp /v1/rerank over HTTP)
                      → map children → parent sections, dedupe → top N parents
   └─► grade        : LLM judges context sufficiency (JSON, tolerant parsing)
         ├─ sufficient ──► generate
@@ -101,19 +102,20 @@ variable. Groq offers **no embeddings endpoint** — embeddings support `local`/
 
 | Variable | Values / default | Notes |
 |---|---|---|
-| `LLM_PROVIDER` | `local` \| `openai` \| `groq` (default `local`) | `local` = any OpenAI-compatible server (Ollama `/v1`, LM Studio, vLLM) |
-| `LLM_MODEL` | default `qwen3:8b` | Groq example: `openai/gpt-oss-120b` |
-| `LLM_BASE_URL` | default `http://localhost:11434/v1` | used when provider=`local` |
-| `LLM_API_KEY` | default `ollama` | real key for `openai`/`groq` |
+| `LLM_PROVIDER` | `local` \| `openai` \| `groq` (default `local`) | `local` = any OpenAI-compatible server (llama.cpp `llama-server`, vLLM, LM Studio) |
+| `LLM_MODEL` | default `qwen3-8b` | informational for llama.cpp; Groq example: `openai/gpt-oss-120b` |
+| `LLM_BASE_URL` | default `http://localhost:8080/v1` | used when provider=`local` |
+| `LLM_API_KEY` | default `local` | real key for `openai`/`groq` |
 | `LLM_TEMPERATURE` | default `0.1` | |
 | `LLM_TIMEOUT` | default `120` | per-request timeout, seconds |
 | `EMBEDDING_PROVIDER` | `local` \| `openai` (default `local`) | |
-| `EMBEDDING_MODEL` | default `qwen3-embedding:0.6b` | OpenAI: `text-embedding-3-small` |
-| `EMBEDDING_BASE_URL` | default `http://localhost:11434/v1` | |
-| `EMBEDDING_API_KEY` | default `ollama` | |
+| `EMBEDDING_MODEL` | default `qwen3-embedding-0.6b` | recorded in the manifest; OpenAI: `text-embedding-3-small` |
+| `EMBEDDING_BASE_URL` | default `http://localhost:8081/v1` | |
+| `EMBEDDING_API_KEY` | default `local` | |
 | `RERANKER_ENABLED` | default `true` | |
-| `RERANKER_MODEL` | default `BAAI/bge-reranker-v2-m3` | in-process sentence-transformers |
-| `RERANKER_DEVICE` | `auto` \| `mps` \| `cuda` \| `cpu` (default `auto`) | |
+| `RERANKER_MODEL` | default `bge-reranker-v2-m3` | informational for llama.cpp |
+| `RERANKER_BASE_URL` | default `http://localhost:8082/v1` | Jina-style `/v1/rerank` endpoint |
+| `RERANKER_API_KEY` | default `local` | |
 | `CONTEXTUALIZE_CHUNKS` | default `false` | chunk blurbs at ingestion (slow locally) |
 | `CHILD_CHUNK_TOKENS` / `PARENT_CHUNK_TOKENS` | default `250` / `1000` | re-ingestion required on change |
 | `DATA_DIR` | default `./data` | indexes live under `data/index/` |
@@ -125,8 +127,14 @@ variable. Groq offers **no embeddings endpoint** — embeddings support `local`/
 | `GRADING_ENABLED` | default `true` | disable to skip the corrective loop |
 | `LOG_LEVEL` | default `INFO` | |
 
-Local-dev model expectations (Ollama): `ollama pull qwen3:8b qwen3-embedding:0.6b`.
-The reranker downloads from Hugging Face on first use and then runs offline.
+Local-dev model expectations — three llama.cpp `llama-server` instances (all OpenAI-style,
+no Ollama):
+
+```
+llama-server -m <chat-model>.gguf --port 8080
+llama-server -m <embedding-model>.gguf --embeddings --port 8081
+llama-server -m <reranker-model>.gguf --rerank --port 8082
+```
 
 **Re-ingestion is required** whenever the embedding provider/model or chunk parameters change —
 enforced via the manifest.
@@ -155,7 +163,7 @@ farmer_rag/
 │   ├── bm25.py            # BM25 over docstore children
 │   ├── dense.py           # Chroma dense retrieval
 │   ├── hybrid.py          # RRF fusion + variant union
-│   ├── reranker.py        # sentence-transformers CrossEncoder wrapper
+│   ├── reranker.py        # HTTP client for llama.cpp /v1/rerank
 │   └── pipeline.py        # retrieve() facade (children → parents)
 ├── generation/
 │   ├── prompts.py
@@ -176,10 +184,11 @@ eval/golden.example.yaml   # golden-question template for retrieval eval
   `use_responses_api=False`, `check_embedding_ctx_length=False`), `langchain-groq`
 - `langchain-chroma` + `chromadb` (in-process, persisted; first-party maintained)
 - **Avoided**: `langchain-community` (sunset 2026-05, archived) — PDF loading uses `pymupdf4llm`
-  directly; BM25 uses `rank-bm25` behind our own `BaseRetriever`; reranker wraps
-  `sentence-transformers` directly. `langchain.retrievers` no longer exists in 1.x.
+  directly; BM25 uses `rank-bm25` behind our own retriever; reranking is a plain `httpx` call
+  to the llama.cpp `/v1/rerank` endpoint (no torch in the app). `langchain.retrievers` no
+  longer exists in 1.x.
 - `pymupdf4llm` (AGPL-3.0 — fine for this charity deployment; swap to MIT-licensed `docling`
-  if the app is ever distributed commercially), `rank-bm25`, `sentence-transformers`,
+  if the app is ever distributed commercially), `rank-bm25`, `httpx`,
   `pydantic-settings`, `typer`, `rich`, `streamlit`
 - Dev: `pyright`, `ruff`, `pytest`
 
@@ -202,7 +211,7 @@ eval/golden.example.yaml   # golden-question template for retrieval eval
       no ingestion affordances (read-only index status only).
 - [x] **Phase 7 — Quality gates**: unit tests; pyright clean; ruff clean; retrieval eval
       harness (`farmer-rag eval` vs golden YAML); end-to-end smoke test with a sample PDF.
-- [x] **Phase 8 — Docs & delivery**: README (setup, Ollama models, usage), commit history in
+- [x] **Phase 8 — Docs & delivery**: README (setup, llama.cpp servers, usage), commit history in
       logical units, push.
 
 ## 6. Definition of done

@@ -12,5 +12,5 @@ def setup_logging(level: str = "INFO") -> None:
         datefmt="%H:%M:%S",
     )
     # Chroma and httpx are chatty at INFO.
-    for noisy in ("chromadb", "httpx", "urllib3", "sentence_transformers"):
+    for noisy in ("chromadb", "httpx", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.WARNING)

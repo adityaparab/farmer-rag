@@ -43,11 +43,13 @@ def _fail(message: str, exc: Exception | None = None) -> typer.Exit:
 
 
 def _answer_failure_hint(settings: Settings) -> str:
-    return (
-        "Answering failed. Check your model servers — LLM "
-        f"({settings.llm_provider.value}: {settings.llm_model}) and embeddings "
-        f"({settings.embedding_provider.value}: {settings.embedding_model})."
-    )
+    servers = [
+        f"LLM ({settings.llm_provider.value}: {settings.llm_model})",
+        f"embeddings ({settings.embedding_provider.value}: {settings.embedding_model})",
+    ]
+    if settings.reranker_enabled:
+        servers.append(f"reranker ({settings.reranker_base_url})")
+    return "Answering failed. Check your model servers — " + ", ".join(servers) + "."
 
 
 def _print_final_answer(streamed: str, result) -> None:
@@ -193,7 +195,9 @@ def status() -> None:
     table.add_row("Embeddings", f"{settings.embedding_provider.value} / {settings.embedding_model}")
     table.add_row(
         "Reranker",
-        settings.reranker_model if settings.reranker_enabled else "disabled",
+        f"{settings.reranker_model} @ {settings.reranker_base_url}"
+        if settings.reranker_enabled
+        else "disabled",
     )
     table.add_row("Data dir", str(settings.data_dir.resolve()))
     try:
@@ -257,11 +261,13 @@ def eval_cmd(
         try:
             results = retriever.retrieve([question])
         except Exception as exc:
-            raise _fail(
-                "Retrieval failed. Is your embedding server running "
-                f"({settings.embedding_provider.value}: {settings.embedding_base_url})?",
-                exc,
-            ) from exc
+            hint = (
+                f"embedding server ({settings.embedding_provider.value}:"
+                f" {settings.embedding_base_url})"
+            )
+            if settings.reranker_enabled:
+                hint += f" and reranker ({settings.reranker_base_url})"
+            raise _fail(f"Retrieval failed. Check that your {hint} is running.", exc) from exc
         matched: list[str] = []
         for ctx in results:
             pages = set(range(ctx.record.page_start, ctx.record.page_end + 1))

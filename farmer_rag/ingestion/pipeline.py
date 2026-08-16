@@ -58,7 +58,7 @@ def ingest_pdf(settings: Settings, pdf_path: Path, *, force: bool = False) -> In
 
     # Staged build: everything (docstore, Chroma, manifest) is written under
     # data/.build first and swapped into place only once complete, so a failed
-    # embed run (e.g. Ollama down mid-`--force`) never destroys a working index.
+    # embed run (e.g. the embedding server down mid-`--force`) never destroys a working index.
     staging_root = settings.data_dir / ".build"
     if staging_root.exists():
         shutil.rmtree(staging_root)

@@ -17,7 +17,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class LLMProvider(enum.StrEnum):
-    LOCAL = "local"  # any OpenAI-compatible server: Ollama /v1, LM Studio, vLLM
+    LOCAL = "local"  # any OpenAI-compatible server: llama.cpp llama-server, vLLM, LM Studio
     OPENAI = "openai"
     GROQ = "groq"
 
@@ -25,13 +25,6 @@ class LLMProvider(enum.StrEnum):
 class EmbeddingProvider(enum.StrEnum):
     LOCAL = "local"
     OPENAI = "openai"
-
-
-class RerankerDevice(enum.StrEnum):
-    AUTO = "auto"
-    MPS = "mps"
-    CPU = "cpu"
-    CUDA = "cuda"
 
 
 class Settings(BaseSettings):
@@ -42,23 +35,30 @@ class Settings(BaseSettings):
     )
 
     # --- Chat LLM ---
+    # `local` targets an OpenAI-compatible server; for llama.cpp run e.g.
+    #   llama-server -m <chat-model>.gguf --port 8080
     llm_provider: LLMProvider = LLMProvider.LOCAL
-    llm_model: str = "qwen3:8b"
-    llm_base_url: str = "http://localhost:11434/v1"
-    llm_api_key: str = "ollama"
+    llm_model: str = "qwen3-8b"
+    llm_base_url: str = "http://localhost:8080/v1"
+    llm_api_key: str = "local"
     llm_temperature: float = 0.1
     llm_timeout: float = Field(default=120.0, description="Per-request timeout in seconds")
 
     # --- Embeddings ---
+    # llama.cpp: llama-server -m <embedding-model>.gguf --embeddings --port 8081
+    # The model name is informational to llama.cpp but is recorded in the index
+    # manifest — keep it matching the GGUF you actually serve.
     embedding_provider: EmbeddingProvider = EmbeddingProvider.LOCAL
-    embedding_model: str = "qwen3-embedding:0.6b"
-    embedding_base_url: str = "http://localhost:11434/v1"
-    embedding_api_key: str = "ollama"
+    embedding_model: str = "qwen3-embedding-0.6b"
+    embedding_base_url: str = "http://localhost:8081/v1"
+    embedding_api_key: str = "local"
 
-    # --- Reranker (in-process cross-encoder) ---
+    # --- Reranker (served over HTTP, e.g. llama.cpp /v1/rerank) ---
+    # llama.cpp: llama-server -m <reranker-model>.gguf --rerank --port 8082
     reranker_enabled: bool = True
-    reranker_model: str = "BAAI/bge-reranker-v2-m3"
-    reranker_device: RerankerDevice = RerankerDevice.AUTO
+    reranker_model: str = "bge-reranker-v2-m3"
+    reranker_base_url: str = "http://localhost:8082/v1"
+    reranker_api_key: str = "local"
 
     # --- Ingestion ---
     contextualize_chunks: bool = False
@@ -103,7 +103,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_cloud_keys(self) -> Settings:
-        placeholder_keys = {"", "ollama", "changeme", "your-api-key"}
+        placeholder_keys = {"", "local", "ollama", "changeme", "your-api-key"}
         if self.llm_provider is not LLMProvider.LOCAL and self.llm_api_key in placeholder_keys:
             raise ValueError(
                 f"LLM_PROVIDER={self.llm_provider.value} requires a real LLM_API_KEY"

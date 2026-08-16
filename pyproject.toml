@@ -5,6 +5,7 @@ description = "Production-grade RAG over a homeopathy-in-farming book: hybrid re
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "httpx>=0.28.1",
     "langchain>=1.3.15",
     "langchain-chroma>=1.1.0",
     "langchain-groq>=1.1.3",
@@ -16,7 +17,6 @@ dependencies = [
     "pyyaml>=6.0.3",
     "rank-bm25>=0.2.2",
     "rich>=15.0.0",
-    "sentence-transformers>=5.7.0",
     "streamlit>=1.61.1",
     "typer>=0.27.1",
 ]

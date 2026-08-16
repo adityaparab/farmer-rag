@@ -1,7 +1,7 @@
 """Factories for chat models and embeddings, switched by provider config.
 
-Local providers are any OpenAI-compatible server (Ollama ``/v1``, LM Studio,
-vLLM). Two quirks are handled here so the rest of the codebase never thinks
+Local providers are any OpenAI-compatible server (llama.cpp ``llama-server``,
+vLLM, LM Studio). Two quirks are handled here so the rest of the codebase never thinks
 about providers:
 
 - ``use_responses_api=False``: ChatOpenAI may infer the Responses API from the
