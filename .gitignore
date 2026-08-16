@@ -8,3 +8,13 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Secrets
+.env
+
+# Ingested data / indexes
+data/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
