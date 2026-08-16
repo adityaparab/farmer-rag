@@ -1,0 +1,26 @@
+# Golden question set for `farmer-rag eval`.
+# Copy to eval/golden.yaml and fill in real questions once the book is ingested.
+#
+# Each case:
+#   question:        what a farmer would actually ask (mix colloquial + precise)
+#   expect_pages:    page numbers where the answer lives (hit if any retrieved
+#                    section overlaps)
+#   expect_keywords: terms that must appear in the retrieved text (hit if any match)
+#   out_of_book:     true for questions the book does NOT answer — these are
+#                    skipped by the retrieval eval but useful for manually
+#                    checking that `farmer-rag ask` abstains.
+
+- question: "What remedy does the book suggest for powdery mildew?"
+  expect_keywords: ["silicea", "powdery mildew"]
+  expect_pages: []
+
+- question: "white powder on my tomato leaves, what should I spray?"
+  expect_keywords: ["powdery mildew"]
+  expect_pages: []
+
+- question: "How do I prepare a 30CH potency for field application?"
+  expect_keywords: ["potency", "dilution"]
+  expect_pages: []
+
+- question: "What is the capital of France?"
+  out_of_book: true
