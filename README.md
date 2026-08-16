@@ -96,6 +96,29 @@ uv run farmer-rag eval eval/golden.yaml
 4. When retrieval finds nothing relevant (after one corrective query rewrite), the app
    abstains rather than falling back to model knowledge.
 
+## Troubleshooting slow or "hanging" answers
+
+With local models the first query after a server (re)start is the worst case: the model
+loads into memory and processes the full prompt before a single token appears. Reasoning
+models additionally "think" before answering — the CLI and web UI show live pipeline status
+("Searching the book…", "Writing the answer…"), and with a reasoning model expect a silent
+gap before the first word of the answer.
+
+If answers time out:
+
+- Raise `LLM_TIMEOUT` (default 300s) rather than lowering it — and keep `LLM_MAX_RETRIES`
+  low (default 1). On a single-slot server an aborted request keeps the server busy while
+  the retry queues behind it, which compounds into a pile-up that looks like a hang.
+- If answers hang **while the model server sits idle**, your gateway/proxy is dropping the
+  final SSE stream chunks (symptom: the app's connections stuck in `CLOSE_WAIT`). Set
+  `LLM_STREAMING=false` — answers then arrive in one piece over plain HTTP, which is
+  immune to this; the live pipeline status still shows. Internal pipeline calls
+  (query understanding, grading) never use streaming regardless.
+- `GRADING_ENABLED=false` removes one LLM call per question if you need speed over the
+  corrective loop.
+- `farmer-rag eval` exercises retrieval without any LLM calls — use it to isolate whether
+  a problem is retrieval or generation.
+
 ## Development
 
 ```bash

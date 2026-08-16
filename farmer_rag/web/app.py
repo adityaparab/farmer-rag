@@ -109,29 +109,25 @@ def main() -> None:
     ]
 
     with st.chat_message("assistant"):
+        progress = st.status("Consulting the book…")
         placeholder = st.empty()
         streamed = ""
         result: AnswerResult | None = None
         try:
-            # The spinner covers understand/retrieve/grade; it ends when the
-            # first generated token (or the final result) arrives.
-            with st.spinner("Consulting the book…"):
-                events = engine.stream(question, history)
-                first = next(events, None)
-
-            def _iterate():
-                if first is not None:
-                    yield first
-                yield from events
-
-            for kind, payload in _iterate():
-                if kind == "token":
+            for kind, payload in engine.stream(question, history):
+                if kind == "status":
+                    progress.update(label=str(payload))
+                elif kind == "token":
+                    if not streamed:
+                        progress.update(label="Writing the answer…", state="complete")
                     streamed += str(payload)
                     placeholder.markdown(streamed + "▌")
                 else:
                     assert isinstance(payload, AnswerResult)
                     result = payload
+            progress.update(label="Done", state="complete")
         except Exception as exc:
+            progress.update(label="Failed", state="error")
             placeholder.error(f"Answering failed: {exc}")
             st.session_state.messages.pop()
             return

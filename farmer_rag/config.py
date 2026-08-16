@@ -42,7 +42,18 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://localhost:8080/v1"
     llm_api_key: str = "local"
     llm_temperature: float = 0.1
-    llm_timeout: float = Field(default=120.0, description="Per-request timeout in seconds")
+    # Local reasoning models think before answering; a big prompt on a cold
+    # single-slot server can take minutes. A short timeout with retries makes
+    # it worse: the aborted request keeps occupying the server while the retry
+    # queues behind it.
+    llm_timeout: float = Field(default=300.0, description="Per-request timeout in seconds")
+    llm_max_retries: int = Field(default=1, description="HTTP retries per LLM request")
+    # Streaming needs a gateway whose SSE reliably terminates. If answers hang
+    # while the model server sits idle (connections stuck in CLOSE_WAIT), the
+    # proxy is dropping final stream chunks — set this to false.
+    llm_streaming: bool = Field(
+        default=True, description="Stream answer tokens; disable for flaky SSE gateways"
+    )
 
     # --- Embeddings ---
     # llama.cpp: llama-server -m <embedding-model>.gguf --embeddings --port 8081
@@ -59,6 +70,11 @@ class Settings(BaseSettings):
     reranker_model: str = "bge-reranker-v2-m3"
     reranker_base_url: str = "http://localhost:8082/v1"
     reranker_api_key: str = "local"
+    # Rerank servers hard-limit tokens per query+document pair (llama.cpp: the
+    # physical batch size, often 512). Token-dense chunks (tables, Latin names)
+    # can hit ~1.7 chars/token, so cap conservatively; rerankers weigh early
+    # content most, so truncation barely affects scoring.
+    rerank_max_doc_chars: int = 600
 
     # --- Ingestion ---
     contextualize_chunks: bool = False

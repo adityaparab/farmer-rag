@@ -20,7 +20,17 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from farmer_rag.config import EmbeddingProvider, LLMProvider, Settings
 
 
-def build_chat_model(settings: Settings) -> BaseChatModel:
+def build_chat_model(settings: Settings, *, streaming: bool | None = None) -> BaseChatModel:
+    """Build the configured chat model.
+
+    ``streaming=False`` forces plain (non-SSE) HTTP even when the caller
+    (e.g. LangGraph's message streaming) would auto-switch to streaming —
+    used for internal calls whose tokens are never shown, and for gateways
+    with unreliable SSE (``LLM_STREAMING=false``).
+    """
+    if streaming is None:
+        streaming = settings.llm_streaming
+    disable_streaming = not streaming
     match settings.llm_provider:
         case LLMProvider.LOCAL:
             return ChatOpenAI(
@@ -30,7 +40,8 @@ def build_chat_model(settings: Settings) -> BaseChatModel:
                 temperature=settings.llm_temperature,
                 timeout=settings.llm_timeout,
                 use_responses_api=False,
-                max_retries=2,
+                max_retries=settings.llm_max_retries,
+                disable_streaming=disable_streaming,
             )
         case LLMProvider.OPENAI:
             return ChatOpenAI(
@@ -38,7 +49,8 @@ def build_chat_model(settings: Settings) -> BaseChatModel:
                 api_key=settings.llm_api_key,  # type: ignore[arg-type]
                 temperature=settings.llm_temperature,
                 timeout=settings.llm_timeout,
-                max_retries=2,
+                max_retries=settings.llm_max_retries,
+                disable_streaming=disable_streaming,
             )
         case LLMProvider.GROQ:
             return ChatGroq(
@@ -46,7 +58,8 @@ def build_chat_model(settings: Settings) -> BaseChatModel:
                 api_key=settings.llm_api_key,  # type: ignore[arg-type]
                 temperature=settings.llm_temperature,
                 timeout=settings.llm_timeout,
-                max_retries=2,
+                max_retries=settings.llm_max_retries,
+                disable_streaming=disable_streaming,
             )
 
 

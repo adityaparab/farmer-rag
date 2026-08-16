@@ -52,6 +52,36 @@ def _answer_failure_hint(settings: Settings) -> str:
     return "Answering failed. Check your model servers — " + ", ".join(servers) + "."
 
 
+def _stream_with_status(engine, question: str, history: list[tuple[str, str]] | None = None):
+    """Drive engine.stream(): live status line until the first answer token,
+    then raw token printing. Returns (streamed_text, AnswerResult | None)."""
+    from farmer_rag.generation.graph import AnswerResult
+
+    streamed = ""
+    result: AnswerResult | None = None
+    status = console.status("Consulting the book…")
+    status.start()
+    spinning = True
+    try:
+        for kind, payload in engine.stream(question, history):
+            if kind == "status":
+                if spinning:
+                    status.update(str(payload))
+            elif kind == "token":
+                if spinning:
+                    status.stop()
+                    spinning = False
+                streamed += str(payload)
+                print(payload, end="", flush=True)
+            else:
+                assert isinstance(payload, AnswerResult)
+                result = payload
+    finally:
+        if spinning:
+            status.stop()
+    return streamed, result
+
+
 def _print_final_answer(streamed: str, result) -> None:
     """The streamed text is raw model output; the result carries the validated
     answer. Print it when nothing streamed (abstain path) or when citation
@@ -111,22 +141,8 @@ def ask(
     settings = _load_settings()
     engine = _build_engine(settings)
 
-    from farmer_rag.generation.graph import AnswerResult
-
-    result: AnswerResult | None = None
-    streamed = ""
     try:
-        with console.status("Consulting the book…"):
-            stream = engine.stream(question)
-            first_event = next(stream, None)
-        for event in _chain(first_event, stream):
-            kind, payload = event
-            if kind == "token":
-                streamed += str(payload)
-                print(payload, end="", flush=True)
-            else:
-                assert isinstance(payload, AnswerResult)
-                result = payload
+        streamed, result = _stream_with_status(engine, question)
     except Exception as exc:
         raise _fail(_answer_failure_hint(settings), exc) from exc
     print()
@@ -147,8 +163,6 @@ def chat() -> None:
     settings = _load_settings()
     engine = _build_engine(settings)
 
-    from farmer_rag.generation.graph import AnswerResult
-
     console.print("[bold green]farmer-rag chat[/bold green] — answers come only from the book. "
                   "Type 'exit' to quit.\n")
     history: list[tuple[str, str]] = []
@@ -161,16 +175,8 @@ def chat() -> None:
             continue
         if question.lower() in {"exit", "quit", "q"}:
             break
-        result: AnswerResult | None = None
-        streamed = ""
         try:
-            for kind, payload in engine.stream(question, history):
-                if kind == "token":
-                    streamed += str(payload)
-                    print(payload, end="", flush=True)
-                else:
-                    assert isinstance(payload, AnswerResult)
-                    result = payload
+            streamed, result = _stream_with_status(engine, question, history)
         except Exception as exc:
             err_console.print(f"\n[red]Answering failed:[/red] {exc}")
             err_console.print(f"[dim]{_answer_failure_hint(settings)}[/dim]")
@@ -309,11 +315,6 @@ def _build_engine(settings: Settings):
     except Exception as exc:
         raise _fail("Could not initialize the answer engine.", exc) from exc
 
-
-def _chain(first, rest):
-    if first is not None:
-        yield first
-    yield from rest
 
 
 if __name__ == "__main__":

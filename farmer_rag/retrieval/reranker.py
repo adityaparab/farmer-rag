@@ -26,11 +26,15 @@ class RerankError(RuntimeError):
     """The rerank server is unreachable or returned an unusable response."""
 
 
+_MAX_QUERY_CHARS = 300
+
+
 class Reranker:
     def __init__(self, settings: Settings, client: httpx.Client | None = None) -> None:
         base_url = settings.reranker_base_url.rstrip("/")
         self._url = f"{base_url}/rerank"
         self._model = settings.reranker_model
+        self._max_doc_chars = settings.rerank_max_doc_chars
         self._hint = (
             f"Is your reranker server running ({base_url})? Start it with e.g."
             " `llama-server -m <reranker>.gguf --rerank --port 8082`, or set"
@@ -49,13 +53,20 @@ class Reranker:
                 self._url,
                 json={
                     "model": self._model,
-                    "query": query,
+                    "query": query[:_MAX_QUERY_CHARS],
                     "top_n": len(texts),
-                    "documents": texts,
+                    "documents": [t[: self._max_doc_chars] for t in texts],
                 },
             )
             response.raise_for_status()
             payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            detail = exc.response.text[:300]
+            raise RerankError(
+                f"Rerank server returned HTTP {exc.response.status_code}: {detail}\n"
+                "If this mentions input/batch size, lower RERANK_MAX_DOC_CHARS or raise"
+                " the rerank server's physical batch size (llama-server -ub)."
+            ) from exc
         except httpx.HTTPError as exc:
             raise RerankError(f"Rerank request failed. {self._hint}") from exc
 

@@ -54,7 +54,9 @@ def ingest_pdf(settings: Settings, pdf_path: Path, *, force: bool = False) -> In
             settings.llm_provider.value,
             settings.llm_model,
         )
-        children = contextualize_children(build_chat_model(settings), result.parents, children)
+        children = contextualize_children(
+            build_chat_model(settings, streaming=False), result.parents, children
+        )
 
     # Staged build: everything (docstore, Chroma, manifest) is written under
     # data/.build first and swapped into place only once complete, so a failed

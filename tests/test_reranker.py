@@ -52,6 +52,30 @@ def test_server_down_raises_actionable_error():
         reranker.rerank("q", ["a"])
 
 
+def test_documents_and_query_are_truncated_for_the_server():
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json={"results": [{"index": 0, "relevance_score": 1.0}]})
+
+    reranker = Reranker(_settings(), client=_client(handler))
+    reranker.rerank("q" * 1000, ["d" * 5000])
+    assert len(seen["query"]) == 300
+    assert len(seen["documents"][0]) == 600  # default rerank_max_doc_chars
+
+
+def test_server_error_surfaces_response_body():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "input (703 tokens) is too large"})
+
+    reranker = Reranker(_settings(), client=_client(handler))
+    with pytest.raises(RerankError, match="703 tokens") as excinfo:
+        reranker.rerank("q", ["a"])
+    assert "HTTP 500" in str(excinfo.value)
+    assert "RERANK_MAX_DOC_CHARS" in str(excinfo.value)
+
+
 def test_malformed_response_raises_rerank_error():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"unexpected": True})

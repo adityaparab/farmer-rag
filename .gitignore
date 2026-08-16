@@ -18,3 +18,5 @@ data/
 # Tooling caches
 .pytest_cache/
 .ruff_cache/
+
+assets

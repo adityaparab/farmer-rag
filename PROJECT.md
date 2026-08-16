@@ -107,7 +107,9 @@ variable. Groq offers **no embeddings endpoint** — embeddings support `local`/
 | `LLM_BASE_URL` | default `http://localhost:8080/v1` | used when provider=`local` |
 | `LLM_API_KEY` | default `local` | real key for `openai`/`groq` |
 | `LLM_TEMPERATURE` | default `0.1` | |
-| `LLM_TIMEOUT` | default `120` | per-request timeout, seconds |
+| `LLM_TIMEOUT` | default `300` | per-request timeout, seconds — generous for slow local/reasoning models |
+| `LLM_MAX_RETRIES` | default `1` | keep low for single-slot local servers (aborted requests still occupy them) |
+| `LLM_STREAMING` | default `true` | set `false` for gateways with unreliable SSE (hangs with an idle server); internal pipeline calls never stream regardless |
 | `EMBEDDING_PROVIDER` | `local` \| `openai` (default `local`) | |
 | `EMBEDDING_MODEL` | default `qwen3-embedding-0.6b` | recorded in the manifest; OpenAI: `text-embedding-3-small` |
 | `EMBEDDING_BASE_URL` | default `http://localhost:8081/v1` | |
@@ -116,6 +118,7 @@ variable. Groq offers **no embeddings endpoint** — embeddings support `local`/
 | `RERANKER_MODEL` | default `bge-reranker-v2-m3` | informational for llama.cpp |
 | `RERANKER_BASE_URL` | default `http://localhost:8082/v1` | Jina-style `/v1/rerank` endpoint |
 | `RERANKER_API_KEY` | default `local` | |
+| `RERANK_MAX_DOC_CHARS` | default `600` | truncation guard for the server's per-pair token cap |
 | `CONTEXTUALIZE_CHUNKS` | default `false` | chunk blurbs at ingestion (slow locally) |
 | `CHILD_CHUNK_TOKENS` / `PARENT_CHUNK_TOKENS` | default `250` / `1000` | re-ingestion required on change |
 | `DATA_DIR` | default `./data` | indexes live under `data/index/` |

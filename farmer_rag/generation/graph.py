@@ -75,7 +75,7 @@ class AnswerResult:
     standalone: str = ""
 
 
-StreamEvent = tuple[Literal["token", "result"], str | AnswerResult]
+StreamEvent = tuple[Literal["token", "status", "result"], str | AnswerResult]
 
 
 class AnswerEngine:
@@ -83,7 +83,11 @@ class AnswerEngine:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        # Answer generation streams (unless LLM_STREAMING=false); the internal
+        # calls never do — their tokens are discarded anyway, and plain HTTP
+        # avoids SSE failure modes on flaky gateways.
         self._llm = build_chat_model(settings)
+        self._util_llm = build_chat_model(settings, streaming=False)
         self._retriever = BookRetriever(settings)
         self._book_name = self._retriever.manifest.pdf_name
         self._graph = self._build_graph()
@@ -94,7 +98,7 @@ class AnswerEngine:
         question = state["question"]
         standalone, variants = question, [question]
         try:
-            response = self._llm.invoke(
+            response = self._util_llm.invoke(
                 [
                     SystemMessage(
                         prompts.UNDERSTAND_SYSTEM.format(
@@ -134,7 +138,7 @@ class AnswerEngine:
     def _grade(self, state: RAGState) -> dict[str, Any]:
         sufficient = True  # fail open
         try:
-            response = self._llm.invoke(
+            response = self._util_llm.invoke(
                 [
                     SystemMessage(prompts.GRADE_SYSTEM),
                     HumanMessage(
@@ -156,7 +160,7 @@ class AnswerEngine:
     def _rewrite(self, state: RAGState) -> dict[str, Any]:
         standalone = state["standalone"]
         try:
-            response = self._llm.invoke(
+            response = self._util_llm.invoke(
                 [
                     SystemMessage(prompts.REWRITE_SYSTEM),
                     HumanMessage(f"Question: {state['question']}\nWeak query: {standalone}"),
@@ -244,10 +248,28 @@ class AnswerEngine:
         final = cast(dict[str, Any], self._graph.invoke(_initial_state(question, history)))
         return self._result_from_state(final)
 
+    def _status_after(self, node: str) -> str | None:
+        """Progress text to show once ``node`` completes (local models are slow
+        enough that users need to see the pipeline moving)."""
+        if node == "understand":
+            return "Searching the book…"
+        if node == "retrieve":
+            return (
+                "Checking the found sections…"
+                if self._settings.grading_enabled
+                else "Writing the answer… (reasoning models think before the first word appears)"
+            )
+        if node == "grade":
+            return "Writing the answer… (reasoning models think before the first word appears)"
+        if node == "rewrite":
+            return "Searching again with a rewritten query…"
+        return None
+
     def stream(
         self, question: str, history: list[tuple[str, str]] | None = None
     ) -> Iterator[StreamEvent]:
-        """Yield ("token", text) for the answer as it generates, then ("result", AnswerResult).
+        """Yield ("status", text) progress updates and ("token", text) answer
+        tokens as generation happens, then ("result", AnswerResult).
 
         The streamed tokens are raw model output (minus <think> blocks); the
         final result carries the citation-validated answer — replace the
@@ -255,9 +277,10 @@ class AnswerEngine:
         """
         think_filter = ThinkFilter()
         final_state: dict[str, Any] | None = None
+        yield ("status", "Understanding the question…")
         for item in self._graph.stream(
             _initial_state(question, history),
-            stream_mode=["messages", "values"],
+            stream_mode=["messages", "values", "updates"],
         ):
             mode, payload = cast(tuple[str, Any], item)
             if mode == "messages":
@@ -266,6 +289,11 @@ class AnswerEngine:
                     text = think_filter.feed(chunk.text)
                     if text:
                         yield ("token", text)
+            elif mode == "updates":
+                for node in cast(dict[str, Any], payload):
+                    status = self._status_after(node)
+                    if status:
+                        yield ("status", status)
             elif mode == "values":
                 final_state = payload
         tail = think_filter.flush()
