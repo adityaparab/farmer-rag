@@ -36,3 +36,15 @@ def test_think_filter_holds_back_partial_tag_then_releases():
     assert f.feed("answer <") == "answer "
     # "<" could open a think tag, so it is held; a non-tag continuation releases it.
     assert f.feed("3 apples") == "<3 apples"
+
+
+def test_think_filter_flush_releases_trailing_partial_tag():
+    f = ThinkFilter()
+    assert f.feed("yield increase of <") == "yield increase of "
+    assert f.flush() == "<"
+
+
+def test_think_filter_flush_drops_unclosed_think_block():
+    f = ThinkFilter()
+    assert f.feed("<think>still reasoning") == ""
+    assert f.flush() == ""

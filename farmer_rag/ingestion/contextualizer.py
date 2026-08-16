@@ -76,7 +76,7 @@ def contextualize_children(
             failures += len(batch_children)
             continue
         for child, response in zip(batch_children, responses, strict=True):
-            blurb = _clean(str(response.content))
+            blurb = _clean(response.text)
             if blurb:
                 updated.append(
                     replace(child, search_text=f"[{child.section}]\n{blurb}\n{child.content}")

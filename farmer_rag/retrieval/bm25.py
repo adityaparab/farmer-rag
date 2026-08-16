@@ -34,5 +34,14 @@ class BM25Index:
         if not tokens:
             return []
         scores = self._bm25.get_scores(tokens)
-        order = np.argsort(scores)[::-1][:k]
-        return [self._children[i].id for i in order if scores[i] > 0.0]
+        if scores.max() > 0.0:
+            order = np.argsort(scores)[::-1][:k]
+            return [self._children[i].id for i in order if scores[i] > 0.0]
+        # Tiny corpora (1-2 chunks): BM25Okapi's idf floor goes non-positive for
+        # every term, zeroing all scores. Fall back to plain token overlap so
+        # exact-term matching still works.
+        overlap = [
+            sum(1 for t in set(tokens) if t in doc_freqs) for doc_freqs in self._bm25.doc_freqs
+        ]
+        order = sorted(range(len(overlap)), key=lambda i: overlap[i], reverse=True)[:k]
+        return [self._children[i].id for i in order if overlap[i] > 0]

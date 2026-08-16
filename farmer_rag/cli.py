@@ -42,6 +42,25 @@ def _fail(message: str, exc: Exception | None = None) -> typer.Exit:
     return typer.Exit(1)
 
 
+def _answer_failure_hint(settings: Settings) -> str:
+    return (
+        "Answering failed. Check your model servers — LLM "
+        f"({settings.llm_provider.value}: {settings.llm_model}) and embeddings "
+        f"({settings.embedding_provider.value}: {settings.embedding_model})."
+    )
+
+
+def _print_final_answer(streamed: str, result) -> None:
+    """The streamed text is raw model output; the result carries the validated
+    answer. Print it when nothing streamed (abstain path) or when citation
+    cleanup changed the text."""
+    if not streamed.strip():
+        console.print(result.answer)
+    elif streamed.strip() != result.answer.strip():
+        console.print("\n[dim]Invalid citations were removed; corrected answer:[/dim]")
+        console.print(result.answer)
+
+
 def _print_sources(sources: list) -> None:
     if not sources:
         return
@@ -63,10 +82,16 @@ def ingest(
 
     try:
         manifest = ingest_pdf(settings, pdf, force=force)
+    except ValueError as exc:  # parse/chunk errors carry their own clear message
+        raise _fail(str(exc), exc) from exc
     except Exception as exc:
-        raise _fail("Ingestion failed. Is your embedding server running "
-                    f"({settings.embedding_provider.value}: {settings.embedding_base_url})?",
-                    exc) from exc
+        hint = (
+            f"embedding server ({settings.embedding_provider.value}:"
+            f" {settings.embedding_base_url})"
+        )
+        if settings.contextualize_chunks:
+            hint += f" and LLM ({settings.llm_provider.value}: {settings.llm_model})"
+        raise _fail(f"Ingestion failed. Check that your {hint} is running.", exc) from exc
     console.print(
         f"[green]Ingested[/green] '{manifest.pdf_name}': {manifest.pdf_pages} pages → "
         f"{manifest.n_parents} sections / {manifest.n_children} chunks"
@@ -87,6 +112,7 @@ def ask(
     from farmer_rag.generation.graph import AnswerResult
 
     result: AnswerResult | None = None
+    streamed = ""
     try:
         with console.status("Consulting the book…"):
             stream = engine.stream(question)
@@ -94,16 +120,17 @@ def ask(
         for event in _chain(first_event, stream):
             kind, payload = event
             if kind == "token":
+                streamed += str(payload)
                 print(payload, end="", flush=True)
             else:
                 assert isinstance(payload, AnswerResult)
                 result = payload
     except Exception as exc:
-        raise _fail(f"Answering failed. Is your LLM server running "
-                    f"({settings.llm_provider.value}: {settings.llm_model})?", exc) from exc
+        raise _fail(_answer_failure_hint(settings), exc) from exc
     print()
     if result is None:
         raise _fail("No answer produced")
+    _print_final_answer(streamed, result)
     if show_context:
         console.print("\n[bold]Retrieved sections[/bold]")
         for i, ctx in enumerate(result.contexts, start=1):
@@ -133,18 +160,22 @@ def chat() -> None:
         if question.lower() in {"exit", "quit", "q"}:
             break
         result: AnswerResult | None = None
+        streamed = ""
         try:
             for kind, payload in engine.stream(question, history):
                 if kind == "token":
+                    streamed += str(payload)
                     print(payload, end="", flush=True)
                 else:
                     assert isinstance(payload, AnswerResult)
                     result = payload
         except Exception as exc:
             err_console.print(f"\n[red]Answering failed:[/red] {exc}")
+            err_console.print(f"[dim]{_answer_failure_hint(settings)}[/dim]")
             continue
         print()
         if result is not None:
+            _print_final_answer(streamed, result)
             _print_sources(result.sources)
             history.extend([("user", question), ("assistant", result.answer)])
         print()
@@ -195,14 +226,21 @@ def eval_cmd(
     settings = _load_settings()
     from farmer_rag.retrieval.pipeline import BookRetriever
 
+    # Validate the golden file before the expensive retriever load.
+    cases = yaml.safe_load(golden.read_text(encoding="utf-8")) or []
+    if not isinstance(cases, list):
+        raise _fail("Golden file must be a YAML list of cases")
+    for i, case in enumerate(cases, start=1):
+        if not isinstance(case, dict):
+            raise _fail(
+                f"Golden file entry {i} is not a mapping (got {type(case).__name__}: {case!r});"
+                " each case must look like '- question: ...' (see eval/golden.example.yaml)"
+            )
+
     try:
         retriever = BookRetriever(settings)
     except Exception as exc:
         raise _fail(str(exc), exc) from exc
-
-    cases = yaml.safe_load(golden.read_text(encoding="utf-8")) or []
-    if not isinstance(cases, list):
-        raise _fail("Golden file must be a YAML list of cases")
 
     hits = 0
     evaluated = 0
@@ -216,7 +254,14 @@ def eval_cmd(
             continue
         expect_pages = {int(p) for p in case.get("expect_pages", [])}
         expect_keywords = [str(k).lower() for k in case.get("expect_keywords", [])]
-        results = retriever.retrieve([question])
+        try:
+            results = retriever.retrieve([question])
+        except Exception as exc:
+            raise _fail(
+                "Retrieval failed. Is your embedding server running "
+                f"({settings.embedding_provider.value}: {settings.embedding_base_url})?",
+                exc,
+            ) from exc
         matched: list[str] = []
         for ctx in results:
             pages = set(range(ctx.record.page_start, ctx.record.page_end + 1))

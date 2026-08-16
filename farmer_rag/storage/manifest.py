@@ -72,7 +72,19 @@ class IndexManifest:
             raise IndexError_(
                 "No index found. Run `farmer-rag ingest <pdf>` first (ingestion is CLI-only)."
             )
-        return cls(**json.loads(path.read_text(encoding="utf-8")))
+        try:
+            manifest = cls(**json.loads(path.read_text(encoding="utf-8")))
+        except (ValueError, TypeError) as exc:  # corrupt JSON or schema drift
+            raise IndexError_(
+                "Index manifest is corrupt or unreadable — re-ingest with"
+                " `farmer-rag ingest <pdf> --force`."
+            ) from exc
+        if manifest.schema_version != SCHEMA_VERSION:
+            raise IndexError_(
+                f"Index manifest schema v{manifest.schema_version} does not match the"
+                f" app (v{SCHEMA_VERSION}) — re-ingest with `farmer-rag ingest <pdf> --force`."
+            )
+        return manifest
 
     def check_compatible(self, settings: Settings) -> None:
         mismatches: list[str] = []
@@ -95,6 +107,11 @@ class IndexManifest:
             mismatches.append(
                 f"parent chunk tokens: index={self.parent_chunk_tokens},"
                 f" settings={settings.parent_chunk_tokens}"
+            )
+        if self.contextualized != settings.contextualize_chunks:
+            mismatches.append(
+                f"contextualized chunks: index={self.contextualized},"
+                f" settings={settings.contextualize_chunks}"
             )
         if mismatches:
             raise IndexError_(

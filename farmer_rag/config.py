@@ -10,6 +10,7 @@ from __future__ import annotations
 import enum
 from functools import lru_cache
 from pathlib import Path
+from typing import ClassVar
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -78,8 +79,11 @@ class Settings(BaseSettings):
 
     # --- Storage / misc ---
     data_dir: Path = Path("data")
-    collection_name: str = "farmer_rag_children"
     log_level: str = "INFO"
+
+    # Not env-configurable: a changed collection name would silently point
+    # dense retrieval at an empty Chroma collection (BM25-only degradation).
+    collection_name: ClassVar[str] = "farmer_rag_children"
 
     @property
     def index_dir(self) -> Path:

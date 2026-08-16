@@ -77,3 +77,13 @@ class ThinkFilter:
                 self._buf = self._buf[start + len(self._OPEN) :]
                 self._in_think = True
         return "".join(out)
+
+    def flush(self) -> str:
+        """Release held-back partial-tag text at end of stream.
+
+        Text inside an unclosed <think> block stays dropped, matching
+        ``strip_think``.
+        """
+        out = "" if self._in_think else self._buf
+        self._buf = ""
+        return out

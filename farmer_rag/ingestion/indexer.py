@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 
 from langchain_chroma import Chroma
 from langchain_core.embeddings import Embeddings
@@ -14,13 +13,6 @@ from farmer_rag.storage.docstore import ChildRecord, DocStore, ParentRecord
 logger = logging.getLogger(__name__)
 
 _EMBED_BATCH = 64
-
-
-def wipe_index(settings: Settings) -> None:
-    if settings.chroma_dir.exists():
-        shutil.rmtree(settings.chroma_dir)
-    settings.docstore_path.unlink(missing_ok=True)
-    settings.manifest_path.unlink(missing_ok=True)
 
 
 def index_chunks(

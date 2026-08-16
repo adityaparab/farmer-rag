@@ -96,3 +96,27 @@ def test_incompatible_settings_are_rejected(indexed: Settings):
     changed = indexed.model_copy(update={"embedding_model": "some-other-model"})
     with pytest.raises(IndexError_, match="embedding model"):
         BookRetriever(changed)
+
+
+def test_contextualize_flag_change_is_rejected(indexed: Settings):
+    changed = indexed.model_copy(update={"contextualize_chunks": True})
+    with pytest.raises(IndexError_, match="contextualized"):
+        BookRetriever(changed)
+
+
+def test_corrupt_manifest_gives_actionable_error(indexed: Settings):
+    indexed.manifest_path.write_text("{ not json", encoding="utf-8")
+    with pytest.raises(IndexError_, match="--force"):
+        BookRetriever(indexed)
+
+
+def test_index_rebuilt_mid_run_is_refused(indexed: Settings):
+    import os
+
+    retriever = BookRetriever(indexed)
+    assert retriever.retrieve(["powdery mildew"])
+    # Simulate a CLI re-ingest while the app holds the old snapshot.
+    stat = indexed.manifest_path.stat()
+    os.utime(indexed.manifest_path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
+    with pytest.raises(IndexError_, match="rebuilt"):
+        retriever.retrieve(["powdery mildew"])

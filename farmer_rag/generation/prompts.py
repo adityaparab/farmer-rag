@@ -72,7 +72,7 @@ Excerpts from the book:
 
 {contexts}
 
-Question: {question}\
+Question: {question}{standalone_block}\
 """
 
 ABSTAIN_MESSAGE = (

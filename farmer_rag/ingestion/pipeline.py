@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
 from farmer_rag.config import Settings
 from farmer_rag.ingestion.chunker import chunk_book
 from farmer_rag.ingestion.contextualizer import contextualize_children
-from farmer_rag.ingestion.indexer import index_chunks, wipe_index
+from farmer_rag.ingestion.indexer import index_chunks
 from farmer_rag.ingestion.parser import parse_pdf, sha256_of
 from farmer_rag.models import build_chat_model, build_embeddings
 from farmer_rag.storage.manifest import IndexManifest
@@ -55,9 +56,14 @@ def ingest_pdf(settings: Settings, pdf_path: Path, *, force: bool = False) -> In
         )
         children = contextualize_children(build_chat_model(settings), result.parents, children)
 
-    logger.info("Wiping any previous index")
-    wipe_index(settings)
-    index_chunks(settings, build_embeddings(settings), result.parents, children)
+    # Staged build: everything (docstore, Chroma, manifest) is written under
+    # data/.build first and swapped into place only once complete, so a failed
+    # embed run (e.g. Ollama down mid-`--force`) never destroys a working index.
+    staging_root = settings.data_dir / ".build"
+    if staging_root.exists():
+        shutil.rmtree(staging_root)
+    build_settings = settings.model_copy(update={"data_dir": staging_root})
+    index_chunks(build_settings, build_embeddings(settings), result.parents, children)
 
     manifest = IndexManifest.build(
         settings,
@@ -67,8 +73,20 @@ def ingest_pdf(settings: Settings, pdf_path: Path, *, force: bool = False) -> In
         n_parents=len(result.parents),
         n_children=len(children),
     )
-    manifest.save(settings.manifest_path)
+    manifest.save(build_settings.manifest_path)
+    _swap_into_place(build_settings, settings)
     logger.info(
         "Ingestion complete: %d parents / %d children indexed", len(result.parents), len(children)
     )
     return manifest
+
+
+def _swap_into_place(build_settings: Settings, settings: Settings) -> None:
+    old_dir = settings.index_dir.parent / "index.old"
+    shutil.rmtree(old_dir, ignore_errors=True)
+    settings.index_dir.parent.mkdir(parents=True, exist_ok=True)
+    if settings.index_dir.exists():
+        settings.index_dir.rename(old_dir)
+    build_settings.index_dir.rename(settings.index_dir)
+    shutil.rmtree(old_dir, ignore_errors=True)
+    shutil.rmtree(build_settings.data_dir, ignore_errors=True)

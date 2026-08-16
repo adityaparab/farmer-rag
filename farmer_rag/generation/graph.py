@@ -39,7 +39,8 @@ GENERATE_NODE = "generate"
 class RAGState(TypedDict):
     question: str
     history: list[tuple[str, str]]
-    standalone: str
+    standalone: str  # current retrieval query; _rewrite may replace it with a search query
+    resolved_question: str  # self-contained question from _understand; never overwritten
     variants: list[str]
     contexts: list[RetrievedParent]
     retries: int
@@ -54,6 +55,7 @@ def _initial_state(question: str, history: list[tuple[str, str]] | None) -> RAGS
         question=question,
         history=history or [],
         standalone=question,
+        resolved_question=question,
         variants=[question],
         contexts=[],
         retries=0,
@@ -107,7 +109,7 @@ class AnswerEngine:
                     ),
                 ]
             )
-            data = parse_json_object(str(response.content))
+            data = parse_json_object(response.text)
             if data:
                 if isinstance(data.get("standalone"), str) and data["standalone"].strip():
                     standalone = data["standalone"].strip()
@@ -118,7 +120,12 @@ class AnswerEngine:
             logger.warning("Query understanding failed; using the raw question", exc_info=True)
         variants = variants[: self._settings.max_query_variants]
         logger.info("Standalone question: %r (%d variants)", standalone, len(variants))
-        return {"standalone": standalone, "variants": variants, "retries": 0}
+        return {
+            "standalone": standalone,
+            "resolved_question": standalone,
+            "variants": variants,
+            "retries": 0,
+        }
 
     def _retrieve(self, state: RAGState) -> dict[str, Any]:
         queries = [state["standalone"], *state.get("variants", [])]
@@ -138,7 +145,7 @@ class AnswerEngine:
                     ),
                 ]
             )
-            data = parse_json_object(str(response.content))
+            data = parse_json_object(response.text)
             if data is not None and isinstance(data.get("sufficient"), bool):
                 sufficient = data["sufficient"]
         except Exception:
@@ -155,7 +162,7 @@ class AnswerEngine:
                     HumanMessage(f"Question: {state['question']}\nWeak query: {standalone}"),
                 ]
             )
-            rewritten = strip_think(str(response.content)).strip().strip('"').splitlines()
+            rewritten = strip_think(response.text).strip().strip('"').splitlines()
             if rewritten and rewritten[0].strip():
                 standalone = rewritten[0].strip()
         except Exception:
@@ -166,6 +173,15 @@ class AnswerEngine:
 
     def _generate(self, state: RAGState) -> dict[str, Any]:
         contexts = state.get("contexts", [])
+        # Follow-ups arrive underspecified ("what potency should I use?"); give
+        # the model the self-contained restatement alongside the raw question
+        # (kept for language/tone fidelity — ANSWER_SYSTEM rule 5).
+        resolved = state["resolved_question"]
+        standalone_block = (
+            f"\n(Restated as a self-contained question from the conversation: {resolved})"
+            if resolved != state["question"]
+            else ""
+        )
         response = self._llm.invoke(
             [
                 SystemMessage(prompts.ANSWER_SYSTEM.format(book_name=self._book_name)),
@@ -173,11 +189,12 @@ class AnswerEngine:
                     prompts.ANSWER_USER.format(
                         contexts=prompts.render_contexts(contexts),
                         question=state["question"],
+                        standalone_block=standalone_block,
                     )
                 ),
             ]
         )
-        answer, sources = finalize_answer(strip_think(str(response.content)), contexts)
+        answer, sources = finalize_answer(strip_think(response.text), contexts)
         return {"answer": answer, "sources": sources, "abstained": False}
 
     def _abstain(self, state: RAGState) -> dict[str, Any]:
@@ -245,12 +262,15 @@ class AnswerEngine:
             mode, payload = cast(tuple[str, Any], item)
             if mode == "messages":
                 chunk, metadata = payload
-                if metadata.get("langgraph_node") == GENERATE_NODE and chunk.content:
-                    text = think_filter.feed(str(chunk.content))
+                if metadata.get("langgraph_node") == GENERATE_NODE and chunk.text:
+                    text = think_filter.feed(chunk.text)
                     if text:
                         yield ("token", text)
             elif mode == "values":
                 final_state = payload
+        tail = think_filter.flush()
+        if tail:
+            yield ("token", tail)
         if final_state is None:  # defensive: stream ended without a values snapshot
             raise RuntimeError("Graph produced no final state")
         yield ("result", self._result_from_state(final_state))

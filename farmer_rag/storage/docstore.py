@@ -86,6 +86,12 @@ class DocStore:
                 ],
             )
 
+    def all_parents(self) -> dict[str, ParentRecord]:
+        rows = self._conn.execute(
+            "SELECT id, content, section, page_start, page_end FROM parents ORDER BY rowid"
+        ).fetchall()
+        return {row[0]: ParentRecord(*row) for row in rows}
+
     def all_children(self) -> list[ChildRecord]:
         rows = self._conn.execute(
             "SELECT id, parent_id, content, search_text, section, page_start, page_end"

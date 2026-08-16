@@ -16,7 +16,7 @@ from farmer_rag.retrieval.dense import DenseIndex
 from farmer_rag.retrieval.hybrid import rrf_fuse
 from farmer_rag.retrieval.reranker import Reranker
 from farmer_rag.storage.docstore import ChildRecord, DocStore, ParentRecord
-from farmer_rag.storage.manifest import IndexManifest
+from farmer_rag.storage.manifest import IndexError_, IndexManifest
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +34,17 @@ class BookRetriever:
         self._settings = settings
         self.manifest = IndexManifest.load(settings.manifest_path)
         self.manifest.check_compatible(settings)
+        # Snapshot marker: if the index is rebuilt while this retriever lives
+        # (CLI re-ingest under a running web app), refuse to serve mixed data.
+        self._manifest_mtime_ns = settings.manifest_path.stat().st_mtime_ns
 
+        # One consistent in-memory snapshot of children AND parents — parent
+        # ids are sequential per build, so mixing an old child match with a
+        # freshly re-read docstore would silently return the wrong section.
         docstore = DocStore(settings.docstore_path)
         try:
             children = docstore.all_children()
+            self._parents_by_id: dict[str, ParentRecord] = docstore.all_parents()
         finally:
             docstore.close()
         if not children:
@@ -54,6 +61,7 @@ class BookRetriever:
 
     def retrieve(self, queries: list[str]) -> list[RetrievedParent]:
         """Hybrid-retrieve for every query variant, fuse, rerank, expand to parents."""
+        self._check_index_unchanged()
         settings = self._settings
         queries = [q for q in dict.fromkeys(q.strip() for q in queries) if q]
         if not queries:
@@ -86,17 +94,24 @@ class BookRetriever:
                 parent_order.append(child.parent_id)
         parent_order = parent_order[: settings.top_parents]
 
-        docstore = DocStore(settings.docstore_path)
-        try:
-            parents = docstore.get_parents(parent_order)
-        finally:
-            docstore.close()
         results = [
-            RetrievedParent(record=parents[pid], score=best_by_parent[pid])
+            RetrievedParent(record=self._parents_by_id[pid], score=best_by_parent[pid])
             for pid in parent_order
-            if pid in parents
+            if pid in self._parents_by_id
         ]
         logger.debug(
             "Retrieved %d parents for %r (variants=%d)", len(results), queries[0], len(queries)
         )
         return results
+
+    def _check_index_unchanged(self) -> None:
+        try:
+            current_mtime_ns = self._settings.manifest_path.stat().st_mtime_ns
+        except FileNotFoundError as exc:
+            raise IndexError_(
+                "The index was removed while the app was running — re-ingest and restart."
+            ) from exc
+        if current_mtime_ns != self._manifest_mtime_ns:
+            raise IndexError_(
+                "The index was rebuilt while the app was running — restart the app to load it."
+            )

@@ -59,8 +59,9 @@ PDF ──► pymupdf4llm (markdown + page map)
     ──► [optional] contextual blurb per child (LLM, config flag)
     ──► indexer ──► Chroma (dense child vectors, persisted)
                 ──► SQLite docstore (parents + children + metadata, feeds BM25)
-                ──► manifest.json (pdf hash, embedding provider/model/dims,
-                                   chunk params, timestamps)
+                ──► manifest.json (pdf hash/pages, embedding provider/model,
+                                   chunk params, contextualized flag, counts,
+                                   timestamp)
 ```
 
 The manifest makes index/config drift a **hard, clear error** at query time (e.g. switching
@@ -105,16 +106,19 @@ variable. Groq offers **no embeddings endpoint** — embeddings support `local`/
 | `LLM_BASE_URL` | default `http://localhost:11434/v1` | used when provider=`local` |
 | `LLM_API_KEY` | default `ollama` | real key for `openai`/`groq` |
 | `LLM_TEMPERATURE` | default `0.1` | |
+| `LLM_TIMEOUT` | default `120` | per-request timeout, seconds |
 | `EMBEDDING_PROVIDER` | `local` \| `openai` (default `local`) | |
 | `EMBEDDING_MODEL` | default `qwen3-embedding:0.6b` | OpenAI: `text-embedding-3-small` |
 | `EMBEDDING_BASE_URL` | default `http://localhost:11434/v1` | |
 | `EMBEDDING_API_KEY` | default `ollama` | |
 | `RERANKER_ENABLED` | default `true` | |
 | `RERANKER_MODEL` | default `BAAI/bge-reranker-v2-m3` | in-process sentence-transformers |
-| `RERANKER_DEVICE` | `auto` \| `mps` \| `cpu` (default `auto`) | |
+| `RERANKER_DEVICE` | `auto` \| `mps` \| `cuda` \| `cpu` (default `auto`) | |
 | `CONTEXTUALIZE_CHUNKS` | default `false` | chunk blurbs at ingestion (slow locally) |
+| `CHILD_CHUNK_TOKENS` / `PARENT_CHUNK_TOKENS` | default `250` / `1000` | re-ingestion required on change |
 | `DATA_DIR` | default `./data` | indexes live under `data/index/` |
 | `DENSE_TOP_K` / `SPARSE_TOP_K` | default `12` / `12` | per query variant |
+| `RRF_K` | default `60` | reciprocal-rank-fusion constant |
 | `RERANK_CANDIDATES` / `TOP_PARENTS` | default `30` / `6` | |
 | `MAX_QUERY_VARIANTS` | default `3` | |
 | `MAX_RETRIEVAL_RETRIES` | default `1` | corrective-loop bound |
@@ -155,7 +159,8 @@ farmer_rag/
 │   └── pipeline.py        # retrieve() facade (children → parents)
 ├── generation/
 │   ├── prompts.py
-│   ├── citations.py       # citation validation, sources assembly, <think> stripping
+│   ├── parsing.py         # tolerant JSON parsing, <think> stripping (ThinkFilter)
+│   ├── citations.py       # citation validation + sources assembly
 │   └── graph.py           # LangGraph corrective flow + streaming
 ├── web/
 │   └── app.py             # Streamlit chat (query-only; no ingestion controls)
